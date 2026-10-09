@@ -65,7 +65,7 @@ _MONTH_NUM = {
 }
 _HLINK_FIELD = re.compile(rb'HYPERLINK\s+"([^"]+)"')
 
-STATE_FILE = Path(__file__).parent / 'state' / 'seen.json'
+STATE_FILE = Path(__file__).parent / 'seen.json'
 
 
 # ══════════════════════════════════════════════════════════
@@ -361,7 +361,7 @@ def send_feishu(info):
 
 
 # ══════════════════════════════════════════════════════════
-#  状态（避免重复通知）—— 存在 state/seen.json，由 workflow 提交回仓库
+#  状态（避免重复通知）—— 存在 seen.json，由 workflow 提交回仓库
 # ══════════════════════════════════════════════════════════
 
 def load_seen():
