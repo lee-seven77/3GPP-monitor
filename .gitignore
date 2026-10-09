@@ -1,0 +1,4 @@
+__pycache__/
+*.pyc
+# 状态文件由 Actions 提交，本地跑产生的忽略
+local_seen.json
