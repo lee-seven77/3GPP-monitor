@@ -1,0 +1,52 @@
+name: 3GPP 会议酒店监控
+
+on:
+  schedule:
+    # 每 15 分钟一次（UTC）。错开整点，避开 GitHub 高峰
+    - cron: '7,22,37,52 * * * *'
+  workflow_dispatch:          # 手动触发（Actions 页面点 Run workflow）
+  push:
+    branches: [main, master]
+
+jobs:
+  monitor:
+    runs-on: ubuntu-latest
+    timeout-minutes: 15
+    # 需要把「已通知」状态提交回仓库，所以要写权限
+    permissions:
+      contents: write
+
+    steps:
+      - name: 拉取代码
+        uses: actions/checkout@v4
+
+      - name: 配置 Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+
+      - name: 安装依赖
+        run: pip install requests urllib3
+
+      - name: 运行监控
+        env:
+          # —— 密钥全部来自 GitHub Secrets，不写在代码里 ——
+          WXPUSHER_APP_TOKEN: ${{ secrets.WXPUSHER_APP_TOKEN }}
+          WXPUSHER_UID: ${{ secrets.WXPUSHER_UID }}
+          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+          # 监控哪些组（可在仓库 Settings → Secrets 里用 GROUPS 覆盖）
+          GROUPS: ${{ vars.GROUPS || 'RAN(全部),SA(全部)' }}
+        run: python monitor.py --volumes 8
+
+      # 只有「已通知」状态变了才提交，避免每次都产生无意义 commit
+      - name: 保存状态
+        run: |
+          git config user.name  "3gpp-monitor[bot]"
+          git config user.email "41898282+github-actions[bot]@users.noreply.github.com"
+          git add -f state/seen.json
+          if git diff --staged --quiet; then
+            echo "状态无变化，跳过提交"
+          else
+            git commit -m "chore: 更新已通知记录 [skip ci]"
+            git push
+          fi
