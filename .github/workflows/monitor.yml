@@ -10,7 +10,8 @@ on:
 
 jobs:
   monitor:
-    runs-on: ubuntu-latest
+    # 钉住版本，避免 ubuntu-latest 迁移带来的提示和意外变化
+    runs-on: ubuntu-24.04
     timeout-minutes: 15
     # 需要把「已通知」状态提交回仓库，所以要写权限
     permissions:
@@ -18,10 +19,10 @@ jobs:
 
     steps:
       - name: 拉取代码
-        uses: actions/checkout@v4
+        uses: actions/checkout@v7
 
       - name: 配置 Python
-        uses: actions/setup-python@v5
+        uses: actions/setup-python@v7
         with:
           python-version: '3.12'
 
