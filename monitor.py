@@ -8,14 +8,12 @@ GitHub Actions 当「大脑和眼睛」（定时跑），企业微信自建应�
      → 下载 .doc 提取订房链接 → 企业微信卡片/飞书推送 → 记录已通知（提交回仓库）
 
 配置全部走环境变量 / GitHub Secrets，**代码里不写任何密钥**：
-  WECOM_CORP_ID        企业微信企业ID（ww 开头）
-  WECOM_AGENT_ID       自建应用 AgentId（数字）
-  WECOM_API_SECRET     自建应用 Secret
+  WECOM_WEBHOOK        企业微信群机器人 webhook（推荐，无 IP 限制）
   FEISHU_WEBHOOK       飞书机器人 webhook（可选）
   GROUPS               监控哪些组，默认全部 14 个（RAN1-6 + SA1-6 + RAN/SA 全会）
 
 本地也能跑：
-  WECOM_CORP_ID=ww... WECOM_AGENT_ID=1000002 WECOM_API_SECRET=xxx python monitor.py --once
+  WECOM_WEBHOOK=https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx python monitor.py --once
 """
 
 import argparse
@@ -320,75 +318,39 @@ def build_invite(msg_url, log=print):
 #  通知：WxPusher（微信）+ 飞书
 # ══════════════════════════════════════════════════════════
 
-def _wecom_get_token():
-    """获取企业微信自建应用 Access Token。"""
-    corp_id = os.environ.get('WECOM_CORP_ID', '').strip()
-    secret = os.environ.get('WECOM_API_SECRET', '').strip()
-    if not corp_id or not secret:
-        return None
-    url = f'https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid={corp_id}&corpsecret={secret}'
-    try:
-        res = requests.get(url, timeout=10).json()
-        if res.get('errcode') == 0:
-            return res.get('access_token')
-        print(f'[企业微信] 获取token失败: {res}')
-        return None
-    except Exception as e:
-        print(f'[企业微信] 获取token异常: {e}')
-        return None
-
-
 def send_wecom(info):
-    """企业微信自建应用 textcard 卡片推送。"""
-    corp_id = os.environ.get('WECOM_CORP_ID', '').strip()
-    agent_id = os.environ.get('WECOM_AGENT_ID', '').strip()
-    secret = os.environ.get('WECOM_API_SECRET', '').strip()
-    if not corp_id or not agent_id or not secret:
-        return '跳过企业微信（未配置 WECOM_CORP_ID / WECOM_AGENT_ID / WECOM_API_SECRET）'
-
-    token = _wecom_get_token()
-    if not token:
-        return '❌ 企业微信 Access Token 获取失败'
+    """企业微信群机器人 markdown 推送（无 IP 限制）。"""
+    webhook = os.environ.get('WECOM_WEBHOOK', '').strip()
+    if not webhook:
+        return '跳过企业微信（未配置 WECOM_WEBHOOK）'
 
     title = f"🏨 3GPP 会议邀请！{info.get('city') or ''}".strip()
-
-    # textcard description 支持 HTML 标签
-    desc_parts = []
-    desc_parts.append(f'<div class="gray">{datetime.now():%Y-%m-%d %H:%M}</div>')
+    lines = [f'**{title}**', '---']
     if info.get('meeting') or info.get('subject'):
-        desc_parts.append(f'<div class="normal"><b>会议：</b>{info.get("meeting") or info.get("subject")}</div>')
+        lines.append(f'**会议：** {info.get("meeting") or info.get("subject")}')
     if info.get('city'):
-        desc_parts.append(f'<div class="normal"><b>📍 地点：</b>{info["city"]}</div>')
+        lines.append(f'**📍 地点：** {info["city"]}')
     if info.get('dates'):
-        desc_parts.append(f'<div class="normal"><b>📅 日期：</b>{info["dates"]}</div>')
+        lines.append(f'**📅 日期：** {info["dates"]}')
     if info.get('venue'):
-        desc_parts.append(f'<div class="normal"><b>🏛 场地：</b>{info["venue"]}</div>')
+        lines.append(f'**🏛 场地：** {info["venue"]}')
     if info.get('hotel_url'):
-        desc_parts.append('<div class="highlight">🔥 酒店已按优惠价预锁定，请尽快下单</div>')
-    description = '\n'.join(desc_parts)
+        lines.append(f'**🔥 酒店：** 已按优惠价预锁定，[点此立即预订]({info["hotel_url"]})')
+    if info.get('coach_url'):
+        lines.append(f'**🚌 班车：** [班车预订]({info["coach_url"]})')
+    if info.get('msg_url'):
+        lines.append(f'**📧 邮件：** [打开原邮件]({info["msg_url"]})')
+    content = '\n'.join(lines)
 
-    # 点击卡片跳转的链接：优先酒店预订，其次原邮件
-    jump_url = info.get('hotel_url') or info.get('msg_url') or ''
-    btntxt = '🔥 立即预订酒店' if info.get('hotel_url') else '📧 打开原邮件'
-
-    data = {
-        'touser': '@all',
-        'msgtype': 'textcard',
-        'agentid': int(agent_id),
-        'textcard': {
-            'title': title,
-            'description': description,
-            'url': jump_url,
-            'btntxt': btntxt,
-        },
-        'safe': 0,
+    payload = {
+        'msgtype': 'markdown',
+        'markdown': {'content': content}
     }
-
     try:
-        url = f'https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token={token}'
-        res = requests.post(url, json=data, timeout=15).json()
+        r = requests.post(webhook, json=payload, timeout=15)
+        res = r.json()
         if res.get('errcode') == 0:
-            return '✅ 企业微信卡片已推送'
+            return '✅ 企业微信已推送'
         return f"❌ 企业微信推送失败: {res.get('errmsg')} (errcode={res.get('errcode')})"
     except Exception as e:
         return f'❌ 企业微信推送异常: {e}'
@@ -461,8 +423,7 @@ def run(groups=None, max_volumes=2):
     print(' 3GPP 会议酒店监控 (GitHub Actions)')
     print('=' * 58)
     print(f' 监控列表 : {", ".join(groups)}')
-    wecom_ok = all([os.environ.get('WECOM_CORP_ID'), os.environ.get('WECOM_AGENT_ID'), os.environ.get('WECOM_API_SECRET')])
-    print(f' 企业微信 : {"已配置" if wecom_ok else "未配置"}')
+    print(f' 企业微信 : {"已配置" if os.environ.get("WECOM_WEBHOOK") else "未配置"}')
     print(f' 飞书推送 : {"已配置" if os.environ.get("FEISHU_WEBHOOK") else "未配置"}')
     print(f' 已记录   : {len(seen)} 封')
     print(f' 运行时间 : {datetime.now():%Y-%m-%d %H:%M:%S}')
