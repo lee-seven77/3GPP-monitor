@@ -11,7 +11,7 @@ GitHub Actions 当「大脑和眼睛」（定时跑），WxPusher / 飞书当「
   WXPUSHER_APP_TOKEN   WxPusher 的 AppToken（AT_ 开头）
   WXPUSHER_UID         WxPusher 的 UID（UID_ 开头）
   FEISHU_WEBHOOK       飞书机器人 webhook（可选，不填就不推飞书）
-  GROUPS               监控哪些组，默认 RAN(全部),SA(全部)
+  GROUPS               监控哪些组，默认全部 14 个（RAN1-6 + SA1-6 + RAN/SA 全会）
 
 本地也能跑：
   FEISHU_WEBHOOK=https://... python monitor.py --once
@@ -136,6 +136,17 @@ def fetch_volume_mails(vol_url):
             'url': href if href.startswith('http') else f'https://list.etsi.org{href}',
         })
     return mails
+
+
+def dedupe_key(subject: str) -> str:
+    """
+    同一封邀请常被转发到多个邮件列表（RAN3 / RAN 全会...），
+    标题可能带 Fw:/Re: 前缀。用「去掉转发前缀后的标题」做唯一键，
+    这样同一个会议只通知一次。
+    """
+    s = re.sub(r'\s+', ' ', subject.strip().lower())
+    s = re.sub(r'^(fw|fwd|re|sv|vs|wg|antw)\s*:\s*', '', s)
+    return s.strip()
 
 
 def parse_meeting_time(subject):
@@ -382,8 +393,12 @@ def save_seen(seen):
 # ══════════════════════════════════════════════════════════
 
 def run(groups=None, max_volumes=8):
+    # 默认监控全部 14 个列表 —— 各工作组是独立邮件列表，
+    # 只盯全会列表会漏掉（实测 RAN3 的 Kobe 邀请就不在全会列表里）
+    default = ('RAN1,RAN2,RAN3,RAN4,RAN5,RAN6,'
+               'SA1,SA2,SA3,SA4,SA5,SA6,RAN(全部),SA(全部)')
     groups = groups or [g.strip() for g in
-                        os.environ.get('GROUPS', 'RAN(全部),SA(全部)').split(',') if g.strip()]
+                        os.environ.get('GROUPS', default).split(',') if g.strip()]
     seen = load_seen()
     print('=' * 58)
     print(' 3GPP 会议酒店监控 (GitHub Actions)')
@@ -398,7 +413,7 @@ def run(groups=None, max_volumes=8):
     new_count = 0
     for g in groups:
         invites = scan_invitations(g, max_volumes=max_volumes, log=print)
-        fresh = [m for m in invites if m['url'] not in seen]
+        fresh = [m for m in invites if dedupe_key(m['subject']) not in seen]
         print(f'[扫描] {g}: 命中 {len(invites)} 封，新增 {len(fresh)} 封')
         for m in fresh:
             print(f'[新] {m["subject"][:70]}')
@@ -407,7 +422,7 @@ def run(groups=None, max_volumes=8):
             print(f"     → {send_feishu(info)}")
             if info.get('hotel_url'):
                 print(f"     → 订房: {info['hotel_url']}")
-            seen.add(m['url'])
+            seen.add(dedupe_key(m['subject']))
             new_count += 1
     save_seen(seen)
     print(f'\n[完成] 本轮新增 {new_count} 封，累计 {len(seen)} 封', flush=True)

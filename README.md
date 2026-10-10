@@ -71,10 +71,10 @@ WxPusher（快递员）  →  通过微信公众号推到你手机
 ## 常见问题
 
 **Q：多久查一次？能改吗？**
-A：默认每 15 分钟。改 `.github/workflows/monitor.yml` 里的 `cron`。注意 GitHub Actions 是 **UTC 时间**，而且高峰期会延迟几分钟。
+A：默认监控**全部 14 个列表**（RAN1-6 / SA1-6 / RAN 全会 / SA 全会）—— 实测只盯全会列表会漏邀请（RAN3 的邀请不在全会列表里）。可用 `GROUPS` 变量缩窄。每 15 分钟一次。改 `.github/workflows/monitor.yml` 里的 `cron`。注意 GitHub Actions 是 **UTC 时间**，而且高峰期会延迟几分钟。
 
 **Q：会不会重复推送？**
-A：不会。已通知的记录存在 `state/seen.json` 并由 Actions 自动提交回仓库，下次跳过。
+A：不会。已通知的记录存在 `seen.json`（按**标题**去重，同一封邀请被转到多个列表也只推一次） 并由 Actions 自动提交回仓库，下次跳过。
 
 **Q：会不会一堆 commit？**
 A：不会。只有**状态变了**（发现新邀请）才提交，平时静默。
@@ -97,4 +97,4 @@ A：会。只提醒**还没过期**的会议（按标题里的月份判断），
 | `monitor.py` | 监控脚本（自包含，含扫描 + 提取订房链接 + 推送） |
 | `.github/workflows/monitor.yml` | GitHub Actions 定时任务 |
 | `requirements.txt` | 依赖（只要 requests） |
-| `state/seen.json` | 已通知记录（Actions 自动提交回仓库） |
+| `seen.json` | 已通知记录（Actions 自动提交回仓库；按标题去重，同一邀请多个列表只推一次） |
