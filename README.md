@@ -1,20 +1,51 @@
 # 🏨 3GPP 会议酒店监控 —— GitHub Actions 版
 
-不用开电脑、不用装任何东西、**完全免费**。GitHub Actions 每 15 分钟跑一次脚本盯 3GPP 网站，发现会议邀请就推**企业微信卡片**到你手机微信。
+不用开电脑、不用装任何东西、**完全免费**。GitHub Actions 每 15 分钟跑一次脚本盯 3GPP 网站，发现会议邀请就推送到你**手机微信**。
 
 ```
 GitHub Actions（大脑+眼睛）  →  每 15 分钟扫一次 3GPP 邮件列表
         ↓ 发现 "Meeting invitation"
    下载 .doc 附件 → 提取酒店预订链接
         ↓
-企业微信自建应用（快递员）  →  textcard 卡片推到微信
+企业微信 / 飞书（快递员）  →  推送到微信
         ↓
-点卡片 → 直达订房平台 🔥
+点消息 → 直达订房平台 🔥
 ```
 
 ---
 
-## 一、企业微信配置（约 5 分钟，免费）
+## 推送方式（三选一，也可组合）
+
+| 方式 | 费用 | 配置难度 | 消息效果 | 同事收消息 |
+|------|:---:|:---:|---------|-----------|
+| **群机器人**（推荐） | 免费 | ⭐ 1分钟 | markdown 文字 | 群里都看得到 |
+| **自建应用** | 免费 | ⭐⭐⭐ 10分钟 | textcard 卡片 | 扫码即收，不用装App |
+| **飞书机器人** | 免费 | ⭐ 1分钟 | 卡片消息 | 群里都看得到 |
+
+---
+
+## 方式一：企业微信群机器人（最简单）
+
+### 1. 创建群机器人
+1. 企业微信建一个群（或用已有群）
+2. 群设置 → **群机器人** → **添加机器人**
+3. 起个名字（如 `3GPP监控助手`）→ 复制 **webhook URL**
+
+### 2. 配置 GitHub Secrets
+仓库 → **Settings** → **Secrets and variables** → **Actions** → **New repository secret**
+
+| Name | Value |
+|---|---|
+| `WECOM_WEBHOOK` | `https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key=xxx` |
+
+### 3. 开跑
+Actions → **Run workflow** → **Run** → 看日志 `✅ 群机器人已推送`
+
+---
+
+## 方式二：企业微信自建应用（卡片效果+同事扫码收）
+
+> 适合团队使用，同事不用装企业微信 App，在普通微信里收卡片。
 
 ### 1. 注册企业微信（个人免费，无需营业执照）
 1. 打开 [企业微信官网](https://work.weixin.qq.com/)，点 **「立即注册」**
@@ -22,96 +53,109 @@ GitHub Actions（大脑+眼睛）  →  每 15 分钟扫一次 3GPP 邮件列表
 3. 用微信扫码绑定为管理员
 
 ### 2. 创建自建应用
-1. 登录企业微信后台 → **「应用管理」** → **「自建」** → **「创建应用」**
-2. 应用名称：`3GPP 监控助手`，可见范围选你自己
+1. 后台 → **「应用管理」** → **「自建」** → **「创建应用」**
+2. 应用名称：`3GPP 监控助手`，可见范围选你自己和同事
 3. 点 **「创建应用」**
 
 ### 3. 记录 3 个关键参数
 
 | 参数 | 在哪里找 |
 |------|---------|
-| **AgentId** | 应用详情页，直接显示（数字） |
+| **AgentId** | 应用详情页（数字） |
 | **Secret** | 应用详情页，点「发送」在手机企业微信上查看 |
 | **CorpId** | 「我的企业」→ 页面最底部（`ww` 开头） |
 
-### 4. 开启「微信直接接收通知」（最爽的一步）
+### 4. 开启「微信直接接收通知」
 1. 「我的企业」→ **「微信插件」**
 2. 用**普通微信扫码**关注
 3. 确保「允许成员在微信中接收消息」**已开启**
+4. **把二维码发给同事** → 同事普通微信扫码即可收消息
 
-✅ 配完后不用装企业微信 App，直接在普通微信里收卡片消息！
+### 5. 解决 IP 白名单问题（关键！）
 
-## 二、在 GitHub 存「钥匙」（不写进代码）
+自建应用有 IP 白名单，GitHub Actions 的 IP 不固定会报 `60020`。解决方案：
 
-> ⚠️ 千万别把 Secret 直接写在代码里。放 GitHub Secrets 才安全。
+**方案 A：用云函数中转（推荐）**
+1. 开通 [腾讯云 SCF](https://cloud.tencent.com/scf)（免费额度够用）
+2. 新建 Python 函数，粘贴 `wecom_relay.py` 的内容
+3. 环境变量配 3 个参数（CorpId / AgentId / Secret）
+4. 创建 **API 网关触发器** → 拿到 URL
+5. 把云函数出站 IP 加到企业微信「可信IP」
+6. GitHub Secrets 加 `WECOM_RELAY_URL` = 云函数 URL
 
-1. 把本文件夹（`3GPP云端监控`）内容**上传为一个 GitHub 仓库**
-2. 仓库 → **Settings** → **Secrets and variables** → **Actions**
-3. 点 **New repository secret**，加这三个：
+**方案 B：本地跑（不走 GitHub）**
+```bash
+WECOM_CORP_ID=ww... WECOM_AGENT_ID=1000002 WECOM_API_SECRET=xxx python monitor.py --once
+```
+
+### 6. 配置 GitHub Secrets
 
 | Name | Value |
 |---|---|
-| `WECOM_CORP_ID` | 你的企业ID（`ww` 开头） |
+| `WECOM_CORP_ID` | 企业ID（`ww` 开头） |
 | `WECOM_AGENT_ID` | 应用 AgentId（数字） |
 | `WECOM_API_SECRET` | 应用 Secret |
+| `WECOM_RELAY_URL` | 云函数 URL（方案A需要） |
 
-**（可选）飞书推送**：再加一个 `FEISHU_WEBHOOK` = 你的飞书机器人 webhook
+---
 
-**（可选）改监控范围**：`Settings → Secrets and variables → Actions → Variables` 加 `GROUPS`，如 `RAN3`（默认全部 14 个 WG）
+## 方式三：飞书机器人
 
-## 三、开跑
+1. 飞书群 → 设置 → **群机器人** → **添加机器人** → **自定义机器人**
+2. 复制 webhook URL
+3. GitHub Secrets 加 `FEISHU_WEBHOOK` = webhook URL
 
-推上去之后它就自动跑了。想立刻看效果：
+> ⚠️ 注意保管好 webhook URL，不要公开发布。GitHub Secrets 是加密存储的，安全。
 
-仓库 → **Actions** → 左侧选 **3GPP 会议酒店监控** → 右侧 **Run workflow** → **Run**
+---
 
-日志里会看到：
+## 组合使用
 
+可以同时配多种推送方式，都配置就都推：
+
+```yaml
+# GitHub Secrets 里同时配：
+WECOM_WEBHOOK:   https://qyapi.weixin.qq.com/...   # 群机器人
+WECOM_RELAY_URL: https://service-xxx.tencentcs.com/...  # 自建应用（中转）
+FEISHU_WEBHOOK:  https://open.feishu.cn/...        # 飞书
 ```
- 监控列表 : RAN1, RAN2, RAN3, ..., RAN(全部), SA(全部)
- 企业微信 : 已配置
- 飞书推送 : 未配置
-[扫描] RAN3: 检查 2 个存档 (ind2610B ~ ind2610A)
-[扫描] RAN3: 命中 1 封，新增 1 封
-[新] Meeting invitation form for 3GPP TSGs#115 March 2027 in Rotterdam
-     → ✅ 企业微信卡片已推送
-     → 订房: https://...
-```
 
-手机微信上会出现 **「3GPP 监控助手」** 的聊天卡片，点击直达订房平台！
+---
 
-## 四、验证配置（可选）
+## 验证配置
 
-在仓库 Actions 页面手动 Run 一次，看日志末尾：
-- `✅ 企业微信卡片已推送` = 成功
-- `跳过企业微信（未配置 WECOM_*）` = Secrets 没填对
-- `❌ 企业微信 Access Token 获取失败` = CorpId 或 Secret 不对
-- `❌ 企业微信推送失败: ...` = AgentId 不对
+Actions → **Run workflow** → 勾选 **「发送测试卡片验证推送通道」** → **Run**
+
+| 日志 | 含义 |
+|------|------|
+| `✅ 群机器人已推送` | 成功 |
+| `✅ 自建应用(中转)已推送` | 成功 |
+| `✅ 自建应用卡片已推送` | 成功（直连模式） |
+| `✅ 飞书已推送` | 成功 |
+| `跳过xxx（未配置）` | 对应 Secrets 没填 |
+| `❌ ... 60020` | 自建应用 IP 白名单问题，用中转模式 |
 
 ---
 
 ## 常见问题
 
 **Q：多久查一次？能改吗？**
-A：默认监控**全部 14 个列表**（RAN1-6 / SA1-6 / RAN 全会 / SA 全会）—— 实测只盯全会列表会漏邀请（RAN3 的邀请不在全会列表里）。可用 `GROUPS` 变量缩窄。每 15 分钟一次。改 `.github/workflows/monitor.yml` 里的 `cron`。注意 GitHub Actions 是 **UTC 时间**，而且高峰期会延迟几分钟。
+A：默认监控**全部 14 个列表**（RAN1-6 / SA1-6 / RAN 全会 / SA 全会）。每 15 分钟一次。改 `.github/workflows/monitor.yml` 里的 `cron`。注意 GitHub Actions 是 **UTC 时间**。
 
 **Q：会不会重复推送？**
-A：不会。已通知的记录存在 `seen.json`（按**标题**去重，同一封邀请被转到多个列表也只推一次）并由 Actions 自动提交回仓库，下次跳过。
-
-**Q：会不会一堆 commit？**
-A：不会。只有**状态变了**（发现新邀请）才提交，平时静默。
+A：不会。已通知的记录存在 `seen.json`（按标题去重）并由 Actions 自动提交回仓库。
 
 **Q：安全吗？**
-A：密钥在 GitHub Secrets，日志和代码里都看不到。GitHub Actions 跑在微软的机器上，不涉及你的公司内网。
+A：密钥在 GitHub Secrets（加密存储，日志和代码里看不到）。飞书/企业微信 webhook URL 注意不要公开发布即可。
 
 **Q：手机要装企业微信吗？**
 A：不用！扫码关注「微信插件」后，直接在普通微信里收消息。
 
 **Q：其他人也能收到吗？**
-A：可以。把同事加到企业微信的「可见范围」里，他们关注微信插件后也能收到卡片。
+A：可以。自建应用：把同事加到「可见范围」，他们扫微信插件二维码即可。群机器人：群里所有人可见。
 
-**Q：会议是几个月后的，还会提醒吗？**
-A：会。只提醒**还没过期**的会议（按标题里的月份判断），所以看到的就是还能订房的。
+**Q：同事不想装企业微信？**
+A：不用装。扫「微信插件」二维码后，消息直接出现在普通微信聊天列表里。
 
 ---
 
@@ -119,7 +163,9 @@ A：会。只提醒**还没过期**的会议（按标题里的月份判断），
 
 | 文件 | 作用 |
 |---|---|
-| `monitor.py` | 监控脚本（自包含，含扫描 + 提取订房链接 + 推送） |
+| `monitor.py` | 监控脚本（扫描 + 提取订房链接 + 多通道推送） |
+| `wecom_relay.py` | 企业微信自建应用云函数中转（可选部署） |
 | `.github/workflows/monitor.yml` | GitHub Actions 定时任务 |
+| `test_wecom.py` | 本地测试企业微信推送连通性 |
 | `requirements.txt` | 依赖（只要 requests） |
-| `seen.json` | 已通知记录（Actions 自动提交回仓库；按标题去重） |
+| `seen.json` | 已通知记录（Actions 自动提交回仓库） |
