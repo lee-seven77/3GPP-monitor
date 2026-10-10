@@ -5,6 +5,11 @@ on:
     # 每 15 分钟一次（UTC）。错开整点，避开 GitHub 高峰
     - cron: '7,22,37,52 * * * *'
   workflow_dispatch:          # 手动触发（Actions 页面点 Run workflow）
+    inputs:
+      test_send:
+        description: '发送测试卡片验证推送通道'
+        type: boolean
+        default: false
   push:
     branches: [main, master]
 
@@ -29,7 +34,17 @@ jobs:
       - name: 安装依赖
         run: pip install requests urllib3
 
+      - name: 测试推送通道
+        if: ${{ inputs.test_send }}
+        env:
+          WECOM_CORP_ID: ${{ secrets.WECOM_CORP_ID }}
+          WECOM_AGENT_ID: ${{ secrets.WECOM_AGENT_ID }}
+          WECOM_API_SECRET: ${{ secrets.WECOM_API_SECRET }}
+          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+        run: python monitor.py --test-send
+
       - name: 运行监控
+        if: ${{ !inputs.test_send }}
         env:
           # —— 密钥全部来自 GitHub Secrets，不写在代码里 ——
           WECOM_CORP_ID: ${{ secrets.WECOM_CORP_ID }}

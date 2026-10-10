@@ -497,10 +497,19 @@ def main():
     args = ap.parse_args()
 
     if args.test_send:
-        demo = {'meeting': '连通性测试', 'city': '（测试）',
-                'dates': '—', 'venue': '—', 'msg_url': ''}
-        print(send_wecom(demo))
-        print(send_feishu(demo))
+        print('=' * 40)
+        print(' 发送测试卡片验证推送通道')
+        print('=' * 40)
+        demo = {
+            'meeting': '3GPP 监控助手 — 连通性测试',
+            'city': '（测试）',
+            'dates': datetime.now().strftime('%Y-%m-%d %H:%M'),
+            'venue': '推送通道正常，后续发现会议邀请会自动推送',
+            'msg_url': 'https://www.3gpp.org/',
+            'hotel_url': '',
+        }
+        print(f' 企业微信: {send_wecom(demo)}')
+        print(f' 飞书推送: {send_feishu(demo)}')
         return
 
     if args.interval and args.interval > 0:
