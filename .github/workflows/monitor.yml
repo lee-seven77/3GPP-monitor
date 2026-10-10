@@ -32,12 +32,13 @@ jobs:
       - name: 运行监控
         env:
           # —— 密钥全部来自 GitHub Secrets，不写在代码里 ——
-          WXPUSHER_APP_TOKEN: ${{ secrets.WXPUSHER_APP_TOKEN }}
-          WXPUSHER_UID: ${{ secrets.WXPUSHER_UID }}
+          WECOM_CORP_ID: ${{ secrets.WECOM_CORP_ID }}
+          WECOM_AGENT_ID: ${{ secrets.WECOM_AGENT_ID }}
+          WECOM_API_SECRET: ${{ secrets.WECOM_API_SECRET }}
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
-          # 监控哪些组（可在仓库 Settings → Secrets 里用 GROUPS 覆盖）
-          GROUPS: ${{ vars.GROUPS || 'RAN(全部),SA(全部)' }}
-        run: python monitor.py --volumes 8
+          # 监控哪些组（可在仓库 Settings → Variables 里用 GROUPS 覆盖）
+          GROUPS: ${{ vars.GROUPS || 'RAN1,RAN2,RAN3,RAN4,RAN5,RAN6,SA1,SA2,SA3,SA4,SA5,SA6,RAN(全部),SA(全部)' }}
+        run: python monitor.py --volumes 2
 
       # 只有「已通知」状态变了才提交，避免每次都产生无意义 commit
       - name: 保存状态

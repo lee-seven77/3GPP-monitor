@@ -3,18 +3,19 @@
 3GPP 会议酒店监控 —— GitHub Actions 版
 ====================================
 
-GitHub Actions 当「大脑和眼睛」（定时跑），WxPusher / 飞书当「信使」（推到微信）。
+GitHub Actions 当「大脑和眼睛」（定时跑），企业微信自建应用 / 飞书当「信使」。
 流程：定时启动 → 扫 3GPP 邮件列表标题 → 发现 "Meeting invitation"
-     → 下载 .doc 提取订房链接 → 微信/飞书推送 → 记录已通知（提交回仓库）
+     → 下载 .doc 提取订房链接 → 企业微信卡片/飞书推送 → 记录已通知（提交回仓库）
 
 配置全部走环境变量 / GitHub Secrets，**代码里不写任何密钥**：
-  WXPUSHER_APP_TOKEN   WxPusher 的 AppToken（AT_ 开头）
-  WXPUSHER_UID         WxPusher 的 UID（UID_ 开头）
-  FEISHU_WEBHOOK       飞书机器人 webhook（可选，不填就不推飞书）
+  WECOM_CORP_ID        企业微信企业ID（ww 开头）
+  WECOM_AGENT_ID       自建应用 AgentId（数字）
+  WECOM_API_SECRET     自建应用 Secret
+  FEISHU_WEBHOOK       飞书机器人 webhook（可选）
   GROUPS               监控哪些组，默认全部 14 个（RAN1-6 + SA1-6 + RAN/SA 全会）
 
 本地也能跑：
-  FEISHU_WEBHOOK=https://... python monitor.py --once
+  WECOM_CORP_ID=ww... WECOM_AGENT_ID=1000002 WECOM_API_SECRET=xxx python monitor.py --once
 """
 
 import argparse
@@ -108,7 +109,8 @@ def _strip(s):
 def fetch_volumes(list_name):
     """从存档目录页拿到所有月份卷（最新在前）。"""
     key = resolve(list_name)
-    resp = http_get(f'{WAM}?A0={key}', retries=2)
+    index_url = f'{WAM}?A0={key}'
+    resp = http_get(index_url, retries=2)
     if resp is None or resp.status_code != 200:
         return []
     out = []
@@ -124,6 +126,19 @@ def fetch_volume_mails(vol_url):
     resp = http_get(vol_url, retries=2)
     if resp is None or resp.status_code != 200:
         return []
+    vol_id = vol_url.split('A1=')[-1].split('&')[0] if 'A1=' in vol_url else vol_url
+    mails = []
+    for tr in _TR_RE.finditer(resp.text):
+        row = tr.group(1)
+        am = _A2_RE.search(row)
+        if not am:
+            continue
+        href = am.group(1)
+        mails.append({
+            'subject': _strip(am.group(2)),
+            'url': href if href.startswith('http') else f'https://list.etsi.org{href}',
+        })
+    return mails
     mails = []
     for tr in _TR_RE.finditer(resp.text):
         row = tr.group(1)
@@ -183,6 +198,12 @@ def scan_invitations(list_name, max_volumes=8, include_past=False, log=print):
             if t < cutoff:
                 break
         todo.append(url)
+
+    # 显示扫描的存档范围，便于排查
+    if todo:
+        first_vol = todo[0].split('A1=')[-1].split('&')[0] if 'A1=' in todo[0] else '?'
+        last_vol = todo[-1].split('A1=')[-1].split('&')[0] if 'A1=' in todo[-1] else '?'
+        log(f'[扫描] {list_name}: 检查 {len(todo)} 个存档 ({first_vol} ~ {last_vol})')
 
     found, seen_urls = [], set()
     if not todo:
@@ -299,42 +320,78 @@ def build_invite(msg_url, log=print):
 #  通知：WxPusher（微信）+ 飞书
 # ══════════════════════════════════════════════════════════
 
-def send_wechat(info):
-    """WxPusher 推送到微信。"""
-    app_token = os.environ.get('WXPUSHER_APP_TOKEN', '').strip()
-    uid = os.environ.get('WXPUSHER_UID', '').strip()
-    if not app_token or not uid:
-        return '跳过微信（未配置 WXPUSHER_*）'
-
-    title = f"🏨 会议邀请来了！{info.get('city') or '3GPP'}"
-    rows = [f"<b>{info.get('meeting') or info.get('subject') or '3GPP 会议邀请'}</b>"]
-    for k, label in (('city', '📍 地点'), ('dates', '📅 日期'), ('venue', '🏛 场地')):
-        if info.get(k):
-            rows.append(f"{label}: {info[k]}")
-    if info.get('hotel_url'):
-        rows.append(f"<a href=\"{info['hotel_url']}\">🔥 点此立即预订酒店</a>")
-    if info.get('coach_url'):
-        rows.append(f"<a href=\"{info['coach_url']}\">🚌 班车预订</a>")
-    if info.get('msg_url'):
-        rows.append(f"<a href=\"{info['msg_url']}\">📧 打开原邮件</a>")
-    content = '<br/>'.join(rows)
-
-    payload = {
-        'appToken': app_token,
-        'content': content,
-        'summary': title,
-        'contentType': 2,          # 2 = HTML，可以放超链接
-        'uids': [uid],
-    }
+def _wecom_get_token():
+    """获取企业微信自建应用 Access Token。"""
+    corp_id = os.environ.get('WECOM_CORP_ID', '').strip()
+    secret = os.environ.get('WECOM_API_SECRET', '').strip()
+    if not corp_id or not secret:
+        return None
+    url = f'https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid={corp_id}&corpsecret={secret}'
     try:
-        r = requests.post('https://wxpusher.zjiecode.com/api/send/message',
-                          json=payload, timeout=15)
-        res = r.json()
-        if res.get('code') == 1000:
-            return '✅ 微信已推送 (WxPusher)'
-        return f"❌ 微信推送失败: {res.get('msg')}"
+        res = requests.get(url, timeout=10).json()
+        if res.get('errcode') == 0:
+            return res.get('access_token')
+        print(f'[企业微信] 获取token失败: {res}')
+        return None
     except Exception as e:
-        return f'❌ 微信推送异常: {e}'
+        print(f'[企业微信] 获取token异常: {e}')
+        return None
+
+
+def send_wecom(info):
+    """企业微信自建应用 textcard 卡片推送。"""
+    corp_id = os.environ.get('WECOM_CORP_ID', '').strip()
+    agent_id = os.environ.get('WECOM_AGENT_ID', '').strip()
+    secret = os.environ.get('WECOM_API_SECRET', '').strip()
+    if not corp_id or not agent_id or not secret:
+        return '跳过企业微信（未配置 WECOM_CORP_ID / WECOM_AGENT_ID / WECOM_API_SECRET）'
+
+    token = _wecom_get_token()
+    if not token:
+        return '❌ 企业微信 Access Token 获取失败'
+
+    title = f"🏨 3GPP 会议邀请！{info.get('city') or ''}".strip()
+
+    # textcard description 支持 HTML 标签
+    desc_parts = []
+    desc_parts.append(f'<div class="gray">{datetime.now():%Y-%m-%d %H:%M}</div>')
+    if info.get('meeting') or info.get('subject'):
+        desc_parts.append(f'<div class="normal"><b>会议：</b>{info.get("meeting") or info.get("subject")}</div>')
+    if info.get('city'):
+        desc_parts.append(f'<div class="normal"><b>📍 地点：</b>{info["city"]}</div>')
+    if info.get('dates'):
+        desc_parts.append(f'<div class="normal"><b>📅 日期：</b>{info["dates"]}</div>')
+    if info.get('venue'):
+        desc_parts.append(f'<div class="normal"><b>🏛 场地：</b>{info["venue"]}</div>')
+    if info.get('hotel_url'):
+        desc_parts.append('<div class="highlight">🔥 酒店已按优惠价预锁定，请尽快下单</div>')
+    description = '\n'.join(desc_parts)
+
+    # 点击卡片跳转的链接：优先酒店预订，其次原邮件
+    jump_url = info.get('hotel_url') or info.get('msg_url') or ''
+    btntxt = '🔥 立即预订酒店' if info.get('hotel_url') else '📧 打开原邮件'
+
+    data = {
+        'touser': '@all',
+        'msgtype': 'textcard',
+        'agentid': int(agent_id),
+        'textcard': {
+            'title': title,
+            'description': description,
+            'url': jump_url,
+            'btntxt': btntxt,
+        },
+        'safe': 0,
+    }
+
+    try:
+        url = f'https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token={token}'
+        res = requests.post(url, json=data, timeout=15).json()
+        if res.get('errcode') == 0:
+            return '✅ 企业微信卡片已推送'
+        return f"❌ 企业微信推送失败: {res.get('errmsg')} (errcode={res.get('errcode')})"
+    except Exception as e:
+        return f'❌ 企业微信推送异常: {e}'
 
 
 def send_feishu(info):
@@ -392,7 +449,7 @@ def save_seen(seen):
 #  主流程
 # ══════════════════════════════════════════════════════════
 
-def run(groups=None, max_volumes=8):
+def run(groups=None, max_volumes=2):
     # 默认监控全部 14 个列表 —— 各工作组是独立邮件列表，
     # 只盯全会列表会漏掉（实测 RAN3 的 Kobe 邀请就不在全会列表里）
     default = ('RAN1,RAN2,RAN3,RAN4,RAN5,RAN6,'
@@ -404,7 +461,8 @@ def run(groups=None, max_volumes=8):
     print(' 3GPP 会议酒店监控 (GitHub Actions)')
     print('=' * 58)
     print(f' 监控列表 : {", ".join(groups)}')
-    print(f' 微信推送 : {"已配置" if os.environ.get("WXPUSHER_APP_TOKEN") else "未配置"}')
+    wecom_ok = all([os.environ.get('WECOM_CORP_ID'), os.environ.get('WECOM_AGENT_ID'), os.environ.get('WECOM_API_SECRET')])
+    print(f' 企业微信 : {"已配置" if wecom_ok else "未配置"}')
     print(f' 飞书推送 : {"已配置" if os.environ.get("FEISHU_WEBHOOK") else "未配置"}')
     print(f' 已记录   : {len(seen)} 封')
     print(f' 运行时间 : {datetime.now():%Y-%m-%d %H:%M:%S}')
@@ -418,7 +476,7 @@ def run(groups=None, max_volumes=8):
         for m in fresh:
             print(f'[新] {m["subject"][:70]}')
             info = build_invite(m['url'], log=print)
-            print(f"     → {send_wechat(info)}")
+            print(f"     → {send_wecom(info)}")
             print(f"     → {send_feishu(info)}")
             if info.get('hotel_url'):
                 print(f"     → 订房: {info['hotel_url']}")
@@ -434,14 +492,14 @@ def main():
     ap.add_argument('--once', action='store_true', help='只跑一轮')
     ap.add_argument('--interval', type=int, default=0, metavar='MIN',
                     help='本地跑时的轮询间隔（分钟），GitHub 上由 workflow 控制')
-    ap.add_argument('--volumes', type=int, default=8, help='每次扫多少个月份卷')
+    ap.add_argument('--volumes', type=int, default=2, help='每次扫多少个月份卷（默认2，仅最新）')
     ap.add_argument('--test-send', action='store_true', help='发一条测试消息验证配置')
     args = ap.parse_args()
 
     if args.test_send:
         demo = {'meeting': '连通性测试', 'city': '（测试）',
                 'dates': '—', 'venue': '—', 'msg_url': ''}
-        print(send_wechat(demo))
+        print(send_wecom(demo))
         print(send_feishu(demo))
         return
 
