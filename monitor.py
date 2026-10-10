@@ -318,11 +318,11 @@ def build_invite(msg_url, log=print):
 #  通知：WxPusher（微信）+ 飞书
 # ══════════════════════════════════════════════════════════
 
-def send_wecom(info):
-    """企业微信群机器人 markdown 推送（无 IP 限制）。"""
+def _send_wecom_webhook(info):
+    """群机器人 webhook 推送（无 IP 限制）。"""
     webhook = os.environ.get('WECOM_WEBHOOK', '').strip()
     if not webhook:
-        return '跳过企业微信（未配置 WECOM_WEBHOOK）'
+        return None  # 未配置
 
     title = f"🏨 3GPP 会议邀请！{info.get('city') or ''}".strip()
     lines = [f'**{title}**', '---']
@@ -342,18 +342,82 @@ def send_wecom(info):
         lines.append(f'**📧 邮件：** [打开原邮件]({info["msg_url"]})')
     content = '\n'.join(lines)
 
-    payload = {
-        'msgtype': 'markdown',
-        'markdown': {'content': content}
-    }
+    payload = {'msgtype': 'markdown', 'markdown': {'content': content}}
     try:
         r = requests.post(webhook, json=payload, timeout=15)
         res = r.json()
-        if res.get('errcode') == 0:
-            return '✅ 企业微信已推送'
-        return f"❌ 企业微信推送失败: {res.get('errmsg')} (errcode={res.get('errcode')})"
+        return '✅ 群机器人已推送' if res.get('errcode') == 0 else f"❌ 群机器人失败: {res.get('errmsg')}"
     except Exception as e:
-        return f'❌ 企业微信推送异常: {e}'
+        return f'❌ 群机器人异常: {e}'
+
+
+def _send_wecom_app(info):
+    """自建应用 textcard 推送（有 IP 白名单限制，本地跑可用）。"""
+    corp_id = os.environ.get('WECOM_CORP_ID', '').strip()
+    agent_id = os.environ.get('WECOM_AGENT_ID', '').strip()
+    secret = os.environ.get('WECOM_API_SECRET', '').strip()
+    if not corp_id or not agent_id or not secret:
+        return None  # 未配置
+
+    # 获取 token
+    token = None
+    try:
+        res = requests.get(
+            f'https://qyapi.weixin.qq.com/cgi-bin/gettoken?corpid={corp_id}&corpsecret={secret}',
+            timeout=10).json()
+        if res.get('errcode') == 0:
+            token = res.get('access_token')
+        else:
+            return f'❌ 自建应用token失败: {res.get("errmsg")}'
+    except Exception as e:
+        return f'❌ 自建应用token异常: {e}'
+
+    title = f"🏨 3GPP 会议邀请！{info.get('city') or ''}".strip()
+    desc = [f'<div class="gray">{datetime.now():%Y-%m-%d %H:%M}</div>']
+    if info.get('meeting') or info.get('subject'):
+        desc.append(f'<div class="normal"><b>会议：</b>{info.get("meeting") or info.get("subject")}</div>')
+    if info.get('city'):
+        desc.append(f'<div class="normal"><b>📍 地点：</b>{info["city"]}</div>')
+    if info.get('dates'):
+        desc.append(f'<div class="normal"><b>📅 日期：</b>{info["dates"]}</div>')
+    if info.get('venue'):
+        desc.append(f'<div class="normal"><b>🏛 场地：</b>{info["venue"]}</div>')
+    if info.get('hotel_url'):
+        desc.append('<div class="highlight">🔥 酒店已按优惠价预锁定，请尽快下单</div>')
+
+    jump_url = info.get('hotel_url') or info.get('msg_url') or 'https://www.3gpp.org/'
+    data = {
+        'touser': '@all',
+        'msgtype': 'textcard',
+        'agentid': int(agent_id),
+        'textcard': {
+            'title': title,
+            'description': '\n'.join(desc),
+            'url': jump_url,
+            'btntxt': '🔥 立即预订酒店' if info.get('hotel_url') else '📧 打开原邮件',
+        },
+        'safe': 0,
+    }
+    try:
+        r = requests.post(
+            f'https://qyapi.weixin.qq.com/cgi-bin/message/send?access_token={token}',
+            json=data, timeout=15)
+        res = r.json()
+        return '✅ 自建应用卡片已推送' if res.get('errcode') == 0 else f"❌ 自建应用失败: {res.get('errmsg')}"
+    except Exception as e:
+        return f'❌ 自建应用异常: {e}'
+
+
+def send_wecom(info):
+    """企业微信推送：同时尝试群机器人 + 自建应用，配置了哪个就用哪个。"""
+    results = []
+    r1 = _send_wecom_webhook(info)
+    if r1:
+        results.append(r1)
+    r2 = _send_wecom_app(info)
+    if r2:
+        results.append(r2)
+    return ' | '.join(results) if results else '跳过企业微信（未配置 WECOM_WEBHOOK 或 WECOM_CORP_ID 等）'
 
 
 def send_feishu(info):
@@ -423,7 +487,9 @@ def run(groups=None, max_volumes=2):
     print(' 3GPP 会议酒店监控 (GitHub Actions)')
     print('=' * 58)
     print(f' 监控列表 : {", ".join(groups)}')
-    print(f' 企业微信 : {"已配置" if os.environ.get("WECOM_WEBHOOK") else "未配置"}')
+    wecom_bot = '✅' if os.environ.get('WECOM_WEBHOOK') else '—'
+    wecom_app = '✅' if all([os.environ.get('WECOM_CORP_ID'), os.environ.get('WECOM_AGENT_ID'), os.environ.get('WECOM_API_SECRET')]) else '—'
+    print(f' 企业微信 : 群机器人 {wecom_bot} | 自建应用 {wecom_app}')
     print(f' 飞书推送 : {"已配置" if os.environ.get("FEISHU_WEBHOOK") else "未配置"}')
     print(f' 已记录   : {len(seen)} 封')
     print(f' 运行时间 : {datetime.now():%Y-%m-%d %H:%M:%S}')

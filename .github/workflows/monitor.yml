@@ -38,6 +38,9 @@ jobs:
         if: ${{ inputs.test_send }}
         env:
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
+          WECOM_CORP_ID: ${{ secrets.WECOM_CORP_ID }}
+          WECOM_AGENT_ID: ${{ secrets.WECOM_AGENT_ID }}
+          WECOM_API_SECRET: ${{ secrets.WECOM_API_SECRET }}
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
         run: python monitor.py --test-send
 
@@ -45,7 +48,12 @@ jobs:
         if: ${{ !inputs.test_send }}
         env:
           # —— 密钥全部来自 GitHub Secrets，不写在代码里 ——
+          # 群机器人（无 IP 限制，推荐 GitHub Actions 用这个）
           WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
+          # 自建应用（有 IP 白名单限制，本地跑可用；GitHub 上配了可能报 60020）
+          WECOM_CORP_ID: ${{ secrets.WECOM_CORP_ID }}
+          WECOM_AGENT_ID: ${{ secrets.WECOM_AGENT_ID }}
+          WECOM_API_SECRET: ${{ secrets.WECOM_API_SECRET }}
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
           # 监控哪些组（可在仓库 Settings → Variables 里用 GROUPS 覆盖）
           GROUPS: ${{ vars.GROUPS || 'RAN1,RAN2,RAN3,RAN4,RAN5,RAN6,SA1,SA2,SA3,SA4,SA5,SA6,RAN(全部),SA(全部)' }}
