@@ -352,7 +352,41 @@ def _send_wecom_webhook(info):
 
 
 def _send_wecom_app(info):
-    """自建应用 textcard 推送（有 IP 白名单限制，本地跑可用）。"""
+    """自建应用 textcard 推送。支持两种方式：
+    1. 直连（本地跑，IP 在白名单内）
+    2. 云函数中转（GitHub Actions，通过 WECOM_RELAY_URL 转发）
+    """
+    # 优先走云函数中转（无 IP 限制）
+    relay_url = os.environ.get('WECOM_RELAY_URL', '').strip()
+    if relay_url:
+        title = f"🏨 3GPP 会议邀请！{info.get('city') or ''}".strip()
+        desc = [f'<div class="gray">{datetime.now():%Y-%m-%d %H:%M}</div>']
+        if info.get('meeting') or info.get('subject'):
+            desc.append(f'<div class="normal"><b>会议：</b>{info.get("meeting") or info.get("subject")}</div>')
+        if info.get('city'):
+            desc.append(f'<div class="normal"><b>📍 地点：</b>{info["city"]}</div>')
+        if info.get('dates'):
+            desc.append(f'<div class="normal"><b>📅 日期：</b>{info["dates"]}</div>')
+        if info.get('venue'):
+            desc.append(f'<div class="normal"><b>🏛 场地：</b>{info["venue"]}</div>')
+        if info.get('hotel_url'):
+            desc.append('<div class="highlight">🔥 酒店已按优惠价预锁定，请尽快下单</div>')
+        jump_url = info.get('hotel_url') or info.get('msg_url') or 'https://www.3gpp.org/'
+        try:
+            r = requests.post(relay_url, json={
+                'title': title, 'description': '\n'.join(desc),
+                'url': jump_url,
+                'btntxt': '🔥 立即预订酒店' if info.get('hotel_url') else '📧 打开原邮件',
+            }, timeout=15)
+            res = r.json()
+            body = res.get('body', '{}')
+            if isinstance(body, str):
+                body = json.loads(body)
+            return '✅ 自建应用(中转)已推送' if body.get('ok') else f"❌ 自建应用(中转)失败: {body.get('err')}"
+        except Exception as e:
+            return f'❌ 自建应用(中转)异常: {e}'
+
+    # 直连模式（本地跑）
     corp_id = os.environ.get('WECOM_CORP_ID', '').strip()
     agent_id = os.environ.get('WECOM_AGENT_ID', '').strip()
     secret = os.environ.get('WECOM_API_SECRET', '').strip()
