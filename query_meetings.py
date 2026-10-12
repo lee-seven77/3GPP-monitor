@@ -217,14 +217,11 @@ def _gen_hotel_search_urls(city, dates):
         booking_q += f'&checkin={checkin}&checkout={checkout}'
     urls['Booking'] = f'https://www.booking.com/searchresults.html?{booking_q}'
 
-    # 携程（国际版）
-    ctrip_q = f'city={city_enc}'
+    # IHG（会员友好）
+    ihg_q = f'destination={city_enc}'
     if checkin:
-        ctrip_q += f'&checkin={checkin}&checkout={checkout}'
-    urls['携程'] = f'https://hotels.ctrip.com/hotels/list?{ctrip_q}'
-
-    # Google Maps 搜酒店
-    urls['Google'] = f'https://www.google.com/maps/search/hotels+near+{city_enc}'
+        ihg_q += f'&checkin={checkin}&checkout={checkout}'
+    urls['IHG'] = f'https://www.ihg.com/hotels/us/en/reservation/search?{ihg_q}'
 
     return urls
 

@@ -510,7 +510,10 @@ def build_invite(msg_url, log=print):
 # ══════════════════════════════════════════════════════════
 
 def _gen_hotel_search_urls(city, dates):
-    """根据城市和日期生成携程/Booking 酒店搜索链接（会前一天入住、会后一天离开）。"""
+    """根据城市和日期生成酒店搜索链接（会前一天入住、会后一天离开）。
+
+    返回 Booking.com + IHG 两个平台的搜索链接。
+    """
     if not city:
         return {}
     city_enc = city.split(',')[0].strip()
@@ -530,14 +533,16 @@ def _gen_hotel_search_urls(city, dates):
             except ValueError:
                 pass
     urls = {}
+    # Booking.com
     q = f'ss={city_enc}'
     if checkin:
         q += f'&checkin={checkin}&checkout={checkout}'
     urls['Booking'] = f'https://www.booking.com/searchresults.html?{q}'
-    q2 = f'city={city_enc}'
+    # IHG（会员友好）
+    ihg_q = f'destination={city_enc}'
     if checkin:
-        q2 += f'&checkin={checkin}&checkout={checkout}'
-    urls['携程'] = f'https://hotels.ctrip.com/hotels/list?{q2}'
+        ihg_q += f'&checkin={checkin}&checkout={checkout}'
+    urls['IHG'] = f'https://www.ihg.com/hotels/us/en/reservation/search?{ihg_q}'
     return urls
 
 
@@ -558,12 +563,17 @@ def _send_wecom_webhook(info):
     if info.get('venue'):
         lines.append(f'**🏛 场地：** {info["venue"]}')
     if info.get('hotel_url'):
-        lines.append(f'**🔥 酒店：** [点此立即预订]({info["hotel_url"]})')
+        lines.append(f'**🔥 官方订房：** [点此立即预订]({info["hotel_url"]})')
+        # 同时给备选比价（官方可能较贵）
+        if info.get('city'):
+            bk = _gen_hotel_search_urls(info['city'], info.get('dates', ''))
+            parts = [f'[{name}]({url})' for name, url in bk.items()]
+            if parts:
+                lines.append(f'**🏨 备选比价：** {" | ".join(parts)}')
     elif info.get('city'):
-        # 没有官方订房链接 → 生成搜索链接
-        hotel_urls = _gen_hotel_search_urls(info['city'], info.get('dates', ''))
-        if hotel_urls:
-            parts = [f'[{name}]({url})' for name, url in hotel_urls.items()]
+        bk = _gen_hotel_search_urls(info['city'], info.get('dates', ''))
+        parts = [f'[{name}]({url})' for name, url in bk.items()]
+        if parts:
             lines.append(f'**🏨 酒店搜索：** {" | ".join(parts)}')
     if info.get('coach_url'):
         lines.append(f'**🚌 班车：** [班车预订]({info["coach_url"]})')
@@ -694,11 +704,16 @@ def send_feishu(info):
         if info.get(k):
             rows.append(f'**{label}:** {info[k]}')
     if info.get('hotel_url'):
-        rows.append(f'**🏨 酒店:** [点此立即预订]({info["hotel_url"]})')
+        rows.append(f'**🔥 官方订房:** [点此立即预订]({info["hotel_url"]})')
+        if info.get('city'):
+            bk = _gen_hotel_search_urls(info['city'], info.get('dates', ''))
+            parts = [f'[{name}]({url})' for name, url in bk.items()]
+            if parts:
+                rows.append(f'**🏨 备选比价:** {" | ".join(parts)}')
     elif info.get('city'):
-        hotel_urls = _gen_hotel_search_urls(info['city'], info.get('dates', ''))
-        if hotel_urls:
-            parts = [f'[{name}]({url})' for name, url in hotel_urls.items()]
+        bk = _gen_hotel_search_urls(info['city'], info.get('dates', ''))
+        parts = [f'[{name}]({url})' for name, url in bk.items()]
+        if parts:
             rows.append(f'**🏨 酒店搜索:** {" | ".join(parts)}')
     actions = []
     if info.get('hotel_url'):
