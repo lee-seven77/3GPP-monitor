@@ -30,6 +30,7 @@ from pathlib import Path
 
 import requests
 import urllib3
+from bs4 import BeautifulSoup
 
 warnings.filterwarnings('ignore', message='Unverified HTTPS request')
 urllib3.disable_warnings(urllib3.exceptions.InsecureRequestWarning)
@@ -351,20 +352,48 @@ def extract_hotel_info(data):
     return hotel, coach
 
 
+def _extract_from_email_body(msg_html):
+    """从邮件页面提取正文（含 iframe 里的 HTML part），返回 (text, links)。"""
+    links = []
+    # 提取邮件页本身的超链接
+    for h in re.findall(r'href="(http[^"]+)"', msg_html):
+        links.append(html_mod.unescape(h))
+
+    # 找 iframe 里的正文 HTML part 链接
+    body_text = msg_html
+    iframe_match = re.search(r'href="([^"]*A3=[^"]*text[^"]*html[^"]*)"', msg_html, re.I)
+    if iframe_match:
+        body_url = html_mod.unescape(iframe_match.group(1))
+        if not body_url.startswith('http'):
+            body_url = f'https://list.etsi.org{body_url}'
+        try:
+            resp = http_get(body_url, timeout=20, retries=1)
+            if resp and resp.status_code == 200:
+                body_text = resp.text
+                for h in re.findall(r'href="(http[^"]+)"', body_text):
+                    links.append(html_mod.unescape(h))
+        except Exception:
+            pass
+
+    # 纯文本
+    soup = BeautifulSoup(body_text, 'html.parser')
+    text = re.sub(r'\s+', ' ', soup.get_text(separator=' ', strip=True))
+    return text, links
+
+
 def extract_meeting_info(msg_html, doc_data):
-    """从邮件页 + .doc/.docx 里提取会议信息。"""
+    """从邮件页 + 邮件正文 + .doc/.docx 里提取会议信息。"""
     info = {'subject': '', 'meeting': '', 'city': '', 'dates': '',
             'venue': '', 'hotel_url': '', 'coach_url': ''}
     sm = re.search(r'Subject:\s*</b>\s*</td>\s*<td[^>]*>(.*?)</td>', msg_html, re.I | re.S)
     if sm:
         info['subject'] = re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', ' ', sm.group(1))).strip()
 
-    # 从标题提取城市（如 "Meeting invitation for Kobe, Japan 2027 January"）
+    # 从标题提取城市
     mm = re.search(r'for\s+(.+?)\s+in\s+([A-Za-z][A-Za-z \-]{2,40})\s*$', info['subject'], re.I)
     if mm:
         info['meeting'], info['city'] = mm.group(1).strip(), mm.group(2).strip()
     else:
-        # 尝试 "for Kobe, Japan 2027 January" 格式
         mm2 = re.search(r'for\s+(.+?),\s*([A-Za-z]+)\s+(\d{4})', info['subject'], re.I)
         if mm2:
             info['city'] = f'{mm2.group(1).strip()}, {mm2.group(2).strip()}'
@@ -372,35 +401,91 @@ def extract_meeting_info(msg_html, doc_data):
         else:
             info['meeting'] = info['subject']
 
+    # ── 先从邮件正文提取（很多邀请函的酒店信息在正文里）──
+    body_text, body_links = _extract_from_email_body(msg_html)
+    low_body = body_text.lower()
+
+    # 日期（如 "13-17 April 2026"）
+    dm = re.search(rf'(\d{{1,2}}\s*[-–]\s*\d{{1,2}}\s+(?:{MONTHS})\s+\d{{4}})', body_text, re.I)
+    if dm:
+        info['dates'] = re.sub(r'\s+', ' ', dm.group(1)).strip()
+
+    # 场地
+    vm = re.search(r'(?:Meeting\s+)?[Vv]enue\s*[:：]\s*(.{3,80}?)(?:\s*[Hh]otel\s+[Bb]ooking|\s*[Cc]ost|\s*[Pp]rice|\s*[,;.])', body_text)
+    if vm:
+        info['venue'] = vm.group(1).strip()
+    if not info['venue']:
+        vm2 = re.search(r'((?:[A-Z][A-Za-z]+ )*(?:International )?(?:Conference Cent(?:re|er)|Hotel)\b[^.,;]{0,30})', body_text, re.I)
+        if vm2:
+            info['venue'] = vm2.group(1).strip()
+
+    # 城市（从正文找）
+    if not info['city']:
+        cm = re.search(r'in\s+([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)*),\s*([A-Z][A-Za-z]+)', body_text)
+        if cm:
+            info['city'] = f'{cm.group(1).strip()}, {cm.group(2).strip()}'
+
+    # 酒店订房链接（从正文找 "Hotel booking link: xxx" 或链接文本含 hotel/book）
+    hotel_match = re.search(r'booking\s+link\s*[:：]\s*(https?://[^\s,;]+)', body_text, re.I)
+    if hotel_match:
+        info['hotel_url'] = hotel_match.group(1).strip()
+    if not info['hotel_url']:
+        for url in body_links:
+            url_low = url.lower()
+            if any(k in url_low for k in ('protection.sophos', 'safelinks', 'protection.outlook',
+                                           'googlemaps', 'google.com', 'etsi.org', '3gpp.org')):
+                continue
+            if any(k in url_low for k in ('book.passkey', 'passkey.com', 'hotel', 'booking',
+                                           'reserve', 'accor', 'marriott', 'hilton', 'ihg',
+                                           'intercontinental', 'starwood')):
+                info['hotel_url'] = url
+                break
+
+    # 班车/交通
+    coach_match = re.search(r'(?:coach|shuttle|bus)\s+(?:booking|link|service)\s*[:：]\s*(https?://[^\s,;]+)', body_text, re.I)
+    if coach_match:
+        info['coach_url'] = coach_match.group(1).strip()
+    if not info['coach_url']:
+        for url in body_links:
+            url_low = url.lower()
+            if any(k in url_low for k in ('protection.sophos', 'safelinks', 'protection.outlook')):
+                continue  # 跳过安全跳转链接
+            if any(k in url_low for k in ('coach', 'shuttle', 'bus', 'transfer', 'gotomaastricht')):
+                info['coach_url'] = url
+                break
+
+    # ── 再从附件提取（补充正文没有的信息）──
     if doc_data:
         if doc_data[:2] == b'PK':
-            # .docx：提取纯文本
             full_text, links = _extract_docx_text_and_links(doc_data)
             plain = full_text
-            # 提取日期（如 "25 - 29 January 2027"）
-            dm = re.search(rf'(\d{{1,2}}\s*[-–]\s*\d{{1,2}}\s+(?:{MONTHS})\s+\d{{4}})', plain, re.I)
-            if dm:
-                info['dates'] = re.sub(r'\s+', ' ', dm.group(1)).strip()
-            # 提取场地
-            vm = re.search(r'((?:[A-Z][A-Za-z]+ )*(?:International )?Conference Cent(?:re|er)[^.,;]{0,50})', plain, re.I)
-            if vm:
-                info['venue'] = vm.group(1).strip()
-            # 提取城市（从正文找 "in <City>, <Country>" 格式）
-            if not info['city']:
-                cm = re.search(r'in\s+([A-Z][A-Za-z]+(?:\s+[A-Z][A-Za-z]+)*),\s*([A-Z][A-Za-z]+)', plain)
-                if cm:
-                    info['city'] = f'{cm.group(1).strip()}, {cm.group(2).strip()}'
+            if not info['dates']:
+                dm2 = re.search(rf'(\d{{1,2}}\s*[-–]\s*\d{{1,2}}\s+(?:{MONTHS})\s+\d{{4}})', plain, re.I)
+                if dm2:
+                    info['dates'] = re.sub(r'\s+', ' ', dm2.group(1)).strip()
+            if not info['venue']:
+                vm3 = re.search(r'((?:[A-Z][A-Za-z]+ )*(?:International )?Conference Cent(?:re|er)[^.,;]{0,50})', plain, re.I)
+                if vm3:
+                    info['venue'] = vm3.group(1).strip()
+            if not info['hotel_url']:
+                doc_hotel, doc_coach = extract_hotel_info(doc_data)
+                info['hotel_url'] = info['hotel_url'] or doc_hotel
+                info['coach_url'] = info['coach_url'] or doc_coach
         else:
-            # 老式 .doc
             plain = ' '.join(re.sub(rb'[^\x20-\x7e]', b' ', doc_data).decode('ascii', 'ignore').split())
-            dm = re.search(rf'(\d{{1,2}}\s*[-–]\s*\d{{1,2}}\s+(?:{MONTHS})\s+\d{{4}})', plain, re.I)
-            if dm:
-                info['dates'] = dm.group(1)
-            vm = re.search(r'(MECC[^.]{0,50}|conference cent(?:re|er))', plain, re.I)
-            if vm:
-                info['venue'] = vm.group(1).strip()
+            if not info['dates']:
+                dm3 = re.search(rf'(\d{{1,2}}\s*[-–]\s*\d{{1,2}}\s+(?:{MONTHS})\s+\d{{4}})', plain, re.I)
+                if dm3:
+                    info['dates'] = dm3.group(1)
+            if not info['venue']:
+                vm4 = re.search(r'(MECC[^.]{0,50}|conference cent(?:re|er))', plain, re.I)
+                if vm4:
+                    info['venue'] = vm4.group(1).strip()
+            if not info['hotel_url']:
+                doc_hotel, doc_coach = extract_hotel_info(doc_data)
+                info['hotel_url'] = info['hotel_url'] or doc_hotel
+                info['coach_url'] = info['coach_url'] or doc_coach
 
-        info['hotel_url'], info['coach_url'] = extract_hotel_info(doc_data)
     return info
 
 
