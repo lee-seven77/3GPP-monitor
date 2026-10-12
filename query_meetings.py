@@ -154,6 +154,31 @@ def search_meetings(keyword=None, groups=None, max_volumes=50,
         y = str(year)
         unique = [m for m in unique if y in m['subject']]
 
+    # 按会议日期的月份过滤（标题里的月份，如 "April 2026"）
+    MONTH_WORDS = {
+        1: ['january', 'jan'], 2: ['february', 'feb'], 3: ['march', 'mar'],
+        4: ['april', 'apr'], 5: ['may'], 6: ['june', 'jun'],
+        7: ['july', 'jul'], 8: ['august', 'aug'], 9: ['september', 'sep', 'sept'],
+        10: ['october', 'oct'], 11: ['november', 'nov'], 12: ['december', 'dec'],
+    }
+    if quarter:
+        q = int(quarter)
+        target_months = range((q - 1) * 3 + 1, (q - 1) * 3 + 4)
+    elif month:
+        target_months = [int(month)]
+    else:
+        target_months = None
+
+    if target_months:
+        def _match_month(subject):
+            low = subject.lower()
+            for m in target_months:
+                for word in MONTH_WORDS.get(m, []):
+                    if word in low:
+                        return True
+            return False
+        unique = [m for m in unique if _match_month(m['subject'])]
+
     return unique
 
 

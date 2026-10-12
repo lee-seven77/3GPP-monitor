@@ -424,6 +424,38 @@ def build_invite(msg_url, log=print):
 #  通知：WxPusher（微信）+ 飞书
 # ══════════════════════════════════════════════════════════
 
+def _gen_hotel_search_urls(city, dates):
+    """根据城市和日期生成携程/Booking 酒店搜索链接（会前一天入住、会后一天离开）。"""
+    if not city:
+        return {}
+    city_enc = city.split(',')[0].strip()
+    checkin = checkout = ''
+    if dates:
+        from datetime import datetime, timedelta
+        m = re.search(r'(\d{1,2})\s*[-–]\s*(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})', dates)
+        if m:
+            mon = {'january': 1, 'february': 2, 'march': 3, 'april': 4, 'may': 5,
+                   'june': 6, 'july': 7, 'august': 8, 'september': 9, 'october': 10,
+                   'november': 11, 'december': 12}.get(m.group(3).lower(), 1)
+            try:
+                start = datetime(int(m.group(4)), mon, int(m.group(1)))
+                end = datetime(int(m.group(4)), mon, int(m.group(2)))
+                checkin = (start - timedelta(days=1)).strftime('%Y-%m-%d')
+                checkout = (end + timedelta(days=1)).strftime('%Y-%m-%d')
+            except ValueError:
+                pass
+    urls = {}
+    q = f'ss={city_enc}'
+    if checkin:
+        q += f'&checkin={checkin}&checkout={checkout}'
+    urls['Booking'] = f'https://www.booking.com/searchresults.html?{q}'
+    q2 = f'city={city_enc}'
+    if checkin:
+        q2 += f'&checkin={checkin}&checkout={checkout}'
+    urls['携程'] = f'https://hotels.ctrip.com/hotels/list?{q2}'
+    return urls
+
+
 def _send_wecom_webhook(info):
     """群机器人 webhook 推送（无 IP 限制）。"""
     webhook = os.environ.get('WECOM_WEBHOOK', '').strip()
@@ -441,7 +473,13 @@ def _send_wecom_webhook(info):
     if info.get('venue'):
         lines.append(f'**🏛 场地：** {info["venue"]}')
     if info.get('hotel_url'):
-        lines.append(f'**🔥 酒店：** 已按优惠价预锁定，[点此立即预订]({info["hotel_url"]})')
+        lines.append(f'**🔥 酒店：** [点此立即预订]({info["hotel_url"]})')
+    elif info.get('city'):
+        # 没有官方订房链接 → 生成搜索链接
+        hotel_urls = _gen_hotel_search_urls(info['city'], info.get('dates', ''))
+        if hotel_urls:
+            parts = [f'[{name}]({url})' for name, url in hotel_urls.items()]
+            lines.append(f'**🏨 酒店搜索：** {" | ".join(parts)}')
     if info.get('coach_url'):
         lines.append(f'**🚌 班车：** [班车预订]({info["coach_url"]})')
     if info.get('msg_url'):
@@ -571,7 +609,12 @@ def send_feishu(info):
         if info.get(k):
             rows.append(f'**{label}:** {info[k]}')
     if info.get('hotel_url'):
-        rows.append('**🏨 酒店:** 已按优惠价预锁定，请尽快下单')
+        rows.append(f'**🏨 酒店:** [点此立即预订]({info["hotel_url"]})')
+    elif info.get('city'):
+        hotel_urls = _gen_hotel_search_urls(info['city'], info.get('dates', ''))
+        if hotel_urls:
+            parts = [f'[{name}]({url})' for name, url in hotel_urls.items()]
+            rows.append(f'**🏨 酒店搜索:** {" | ".join(parts)}')
     actions = []
     if info.get('hotel_url'):
         actions.append({'tag': 'button', 'text': {'tag': 'plain_text', 'content': '🔥 立即预订酒店'},
