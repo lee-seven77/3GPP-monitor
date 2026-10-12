@@ -34,19 +34,19 @@ def _parse_volume_date(label):
     return (0, 0)
 
 
-def search_meetings(keyword=None, groups=None, max_volumes=20,
+def search_meetings(keyword=None, groups=None, max_volumes=50,
                     year=None, month=None, quarter=None, log=print):
     """搜索历史会议邀请。支持按年份/月/季度筛选。
 
-    year=2027, month=1  -> 只搜 2027 年 1 月
-    year=2027, quarter=1 -> 只搜 2027 年 Q1 (1-3月)
+    会议邀请通常提前 2-6 个月发出，搜索时优先扫描对应时间段的存档。
+    year=2027, month=1  -> 搜 2026 年 7-12 月存档（提前半年找邀请）+ 标题含 2027
     """
     default = ['RAN1', 'RAN2', 'RAN3', 'RAN4', 'RAN5', 'RAN6',
                'SA1', 'SA2', 'SA3', 'SA4', 'SA5', 'SA6',
                'RAN(全部)', 'SA(全部)']
     groups = groups or default
 
-    # 计算月份范围
+    # 计算月份范围（用于筛选存档的发送时间）
     month_range = None
     if quarter:
         q = int(quarter)
@@ -54,14 +54,51 @@ def search_meetings(keyword=None, groups=None, max_volumes=20,
     elif month:
         month_range = [int(month)]
 
+    # 会议邀请提前 2-6 个月发出：搜会议日期前 2-6 个月的存档
+    # 例如搜 2027 年 1 月的会议 → 邀请可能在 2026 年 7-11 月发出
+    # 所以存档筛选放宽到会议月份前 2-8 个月
+    archive_month_range = None
+    if year and month_range:
+        y = int(year)
+        expanded = set()
+        for m in month_range:
+            for offset in range(2, 9):  # 提前 2-8 个月
+                am = m - offset
+                ay = y
+                while am < 1:
+                    am += 12
+                    ay -= 1
+                expanded.add((ay, am))
+        archive_month_range = expanded
+    elif year and quarter:
+        y = int(year)
+        q = int(quarter)
+        expanded = set()
+        for m in range((q - 1) * 3 + 1, (q - 1) * 3 + 4):
+            for offset in range(2, 9):
+                am = m - offset
+                ay = y
+                while am < 1:
+                    am += 12
+                    ay -= 1
+                expanded.add((ay, am))
+        archive_month_range = expanded
+
     all_mails = []
     for g in groups:
         vols = fetch_volumes(g)
         if not vols:
             continue
 
-        # 按月份筛选存档（年份只在标题匹配，因为会议年份和邮件发送年份可能不同）
-        if month_range:
+        # 按存档时间筛选（用扩展范围）
+        if archive_month_range:
+            filtered_vols = []
+            for label, url in vols:
+                vy, vm = _parse_volume_date(label)
+                if (vy, vm) in archive_month_range:
+                    filtered_vols.append((label, url))
+            todo = filtered_vols[:max_volumes]
+        elif month_range:
             filtered_vols = []
             for label, url in vols:
                 vy, vm = _parse_volume_date(label)

@@ -15,11 +15,19 @@ on:
         type: boolean
         default: false
       search_keyword:
-        description: '搜索关键词（如 Kobe、RAN3#133，留空搜全部）'
+        description: '搜索关键词（如 Kobe、Jeju，留空搜全部）'
         type: string
         default: ''
       search_group:
         description: '工作组（如 RAN3，留空搜全部）'
+        type: string
+        default: ''
+      search_year:
+        description: '按年份筛选（如 2027，留空不限）'
+        type: string
+        default: ''
+      search_quarter:
+        description: '按季度筛选（1-4，留空不限）'
         type: string
         default: ''
   push:
@@ -65,12 +73,18 @@ jobs:
           WECOM_API_SECRET: ${{ secrets.WECOM_API_SECRET }}
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
         run: |
-          ARGS="--push --volumes 30"
+          ARGS="--push --volumes 50"
           if [ -n "${{ inputs.search_keyword }}" ]; then
             ARGS="$ARGS --search ${{ inputs.search_keyword }}"
           fi
           if [ -n "${{ inputs.search_group }}" ]; then
             ARGS="$ARGS --group ${{ inputs.search_group }}"
+          fi
+          if [ -n "${{ inputs.search_year }}" ]; then
+            ARGS="$ARGS --year ${{ inputs.search_year }}"
+          fi
+          if [ -n "${{ inputs.search_quarter }}" ]; then
+            ARGS="$ARGS --quarter ${{ inputs.search_quarter }}"
           fi
           python query_meetings.py $ARGS
 
