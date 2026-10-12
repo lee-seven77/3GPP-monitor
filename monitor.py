@@ -533,16 +533,13 @@ def _gen_hotel_search_urls(city, dates):
             except ValueError:
                 pass
     urls = {}
-    # Booking.com
+    # Booking.com（日期自动填）
     q = f'ss={city_enc}'
     if checkin:
         q += f'&checkin={checkin}&checkout={checkout}'
     urls['Booking'] = f'https://www.booking.com/searchresults.html?{q}'
-    # IHG（会员友好）
-    ihg_q = f'destination={city_enc}'
-    if checkin:
-        ihg_q += f'&checkin={checkin}&checkout={checkout}'
-    urls['IHG'] = f'https://www.ihg.com/hotels/us/en/reservation/search?{ihg_q}'
+    # IHG（会员友好，只带城市，日期在页面手动选）
+    urls['IHG'] = f'https://www.ihg.com/hotels/us/en/find-hotels?destination={city_enc}'
     return urls
 
 
