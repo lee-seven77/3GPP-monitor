@@ -126,10 +126,10 @@ def _gen_hotel_search_urls(city, dates):
         return {}
     city_enc = city.split(',')[0].strip()  # 只取城市名
 
-    # 解析日期
+    # 解析日期（会议前一天入住，后一天离开）
     checkin = checkout = ''
     if dates:
-        from datetime import datetime
+        from datetime import datetime, timedelta
         m = re.search(r'(\d{1,2})\s*[-–]\s*(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})', dates)
         if m:
             mon = {'january': 1, 'february': 2, 'march': 3, 'april': 4, 'may': 5,
@@ -137,8 +137,16 @@ def _gen_hotel_search_urls(city, dates):
                    'november': 11, 'december': 12}.get(m.group(3).lower(), 1)
             y, mo = int(m.group(4)), mon
             d1, d2 = int(m.group(1)), int(m.group(2))
-            checkin = f'{y}-{mo:02d}-{d1:02d}'
-            checkout = f'{y}-{mo:02d}-{d2:02d}'
+            try:
+                meeting_start = datetime(y, mo, d1)
+                meeting_end = datetime(y, mo, d2)
+                checkin_dt = meeting_start - timedelta(days=1)   # 会前一天
+                checkout_dt = meeting_end + timedelta(days=1)    # 会后一天
+                checkin = checkin_dt.strftime('%Y-%m-%d')
+                checkout = checkout_dt.strftime('%Y-%m-%d')
+            except ValueError:
+                checkin = f'{y}-{mo:02d}-{d1:02d}'
+                checkout = f'{y}-{mo:02d}-{d2:02d}'
 
     urls = {}
     # Booking.com
