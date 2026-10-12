@@ -538,10 +538,12 @@ def _gen_hotel_search_urls(city, dates, venue=''):
     if checkin:
         q += f'&checkin={checkin}&checkout={checkout}'
     urls['Booking'] = f'https://www.booking.com/searchresults.html?{q}'
-    # Google Maps 搜会议地址附近酒店（用场地名+城市搜索）
-    search = f'hotels+near+{city_enc}'
+    # Google Maps 直接搜会议场地附近的酒店
+    # 优先用场地名（更精确），否则用城市名
     if venue:
-        search = f'hotels+near+{venue.replace(" ", "+")}+{city_enc}'
+        search = f'hotels+near+{venue.replace(" ", "+")}'
+    else:
+        search = f'hotels+near+{city_enc.replace(" ", "+")}'
     urls['Google Maps'] = f'https://www.google.com/maps/search/{search}'
     return urls
 
