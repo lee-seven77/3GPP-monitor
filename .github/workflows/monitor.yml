@@ -10,6 +10,18 @@ on:
         description: '发送测试卡片验证推送通道'
         type: boolean
         default: false
+      push_history:
+        description: '搜索并推送历史会议邀请（测试完整流程）'
+        type: boolean
+        default: false
+      search_keyword:
+        description: '搜索关键词（如 Kobe、RAN3#133，留空搜全部）'
+        type: string
+        default: ''
+      search_group:
+        description: '工作组（如 RAN3，留空搜全部）'
+        type: string
+        default: ''
   push:
     branches: [main, master]
 
@@ -44,8 +56,26 @@ jobs:
           FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
         run: python monitor.py --test-send
 
+      - name: 推送历史会议邀请（测试完整流程）
+        if: ${{ inputs.push_history }}
+        env:
+          WECOM_WEBHOOK: ${{ secrets.WECOM_WEBHOOK }}
+          WECOM_CORP_ID: ${{ secrets.WECOM_CORP_ID }}
+          WECOM_AGENT_ID: ${{ secrets.WECOM_AGENT_ID }}
+          WECOM_API_SECRET: ${{ secrets.WECOM_API_SECRET }}
+          FEISHU_WEBHOOK: ${{ secrets.FEISHU_WEBHOOK }}
+        run: |
+          ARGS="--push --volumes 30"
+          if [ -n "${{ inputs.search_keyword }}" ]; then
+            ARGS="$ARGS --search ${{ inputs.search_keyword }}"
+          fi
+          if [ -n "${{ inputs.search_group }}" ]; then
+            ARGS="$ARGS --group ${{ inputs.search_group }}"
+          fi
+          python query_meetings.py $ARGS
+
       - name: 运行监控
-        if: ${{ !inputs.test_send }}
+        if: ${{ !inputs.test_send && !inputs.push_history }}
         env:
           # —— 密钥全部来自 GitHub Secrets，不写在代码里 ——
           # 群机器人（无 IP 限制，推荐 GitHub Actions 用这个）
