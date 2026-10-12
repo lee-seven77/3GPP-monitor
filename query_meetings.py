@@ -249,7 +249,7 @@ def show_details(mails, fetch_detail=False, push=False, log=print):
 
             # 没有酒店链接 → 生成搜索链接
             if not info.get('hotel_url') and info.get('city'):
-                hotel_urls = _gen_hotel_search_urls(info['city'], info.get('dates', ''))
+                hotel_urls = _gen_hotel_search_urls(info['city'], info.get('dates', ''), info.get('venue', ''))
                 if hotel_urls:
                     log('      💡 无官方订房链接，可搜索附近酒店：')
                     for name, url in hotel_urls.items():
