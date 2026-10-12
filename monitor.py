@@ -287,12 +287,14 @@ def extract_hotel_info(data):
         full_text, links = _extract_docx_text_and_links(data)
         low_full = full_text.lower()
 
-        # 按超链接显示文本 + 上下文匹配（排除注册链接）
+        # 按超链接显示文本 + 上下文匹配（排除注册/签证/地址链接）
         for text, url in links:
             low = text.lower()
-            if 'registration' in low or 'etsi.org/3gppregistration' in low:
-                continue  # 跳过注册链接
-            if not hotel and any(k in low for k in ('hotel', 'accommodation', 'book', 'reserve', 'ttc.or.jp')):
+            url_low = url.lower()
+            if any(k in low or k in url_low for k in
+                   ('registration', '3gppregistration', 'visa', 'mofa.go.jp', 'kobe-cc.jp')):
+                continue  # 跳过注册/签证/场馆链接
+            if not hotel and any(k in low for k in ('hotel', 'accommodation', 'book', 'reserve')):
                 hotel = url
             if not coach and any(k in low for k in ('coach', 'shuttle', 'bus')):
                 coach = url
@@ -300,11 +302,14 @@ def extract_hotel_info(data):
         # 如果链接文本是 URL 本身，用文档文本上下文判断
         if not hotel and links:
             for kw in ('hotel booking', 'book your hotel', 'hotel reservation',
-                       'booking platform', 'book your room'):
+                       'booking platform', 'book your room', 'hotel booking platform',
+                       'hotel booking site'):
                 idx = low_full.find(kw)
                 if idx >= 0:
                     for text, url in links:
-                        if url and 'registration' not in url.lower():
+                        url_low = url.lower()
+                        if url and not any(k in url_low for k in
+                                           ('registration', 'visa', 'mofa.go.jp', 'kobe-cc.jp', 'ttc.or.jp')):
                             hotel = url
                             break
                     break
