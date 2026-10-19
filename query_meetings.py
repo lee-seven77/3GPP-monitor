@@ -20,6 +20,7 @@ from concurrent.futures import ThreadPoolExecutor, as_completed
 from monitor import (
     fetch_volumes, fetch_volume_mails, build_invite,
     INVITE_RE, MAIL_LISTS, WAM,
+    _gen_hotel_search_urls,
 )
 
 
@@ -180,47 +181,6 @@ def search_meetings(keyword=None, groups=None, max_volumes=50,
         unique = [m for m in unique if _match_month(m['subject'])]
 
     return unique
-
-
-def _gen_hotel_search_urls(city, dates):
-    """根据城市和日期生成携程/Booking 酒店搜索链接。"""
-    if not city:
-        return {}
-    city_enc = city.split(',')[0].strip()  # 只取城市名
-
-    # 解析日期（会议前一天入住，后一天离开）
-    checkin = checkout = ''
-    if dates:
-        from datetime import datetime, timedelta
-        m = re.search(r'(\d{1,2})\s*[-–]\s*(\d{1,2})\s+([A-Za-z]+)\s+(\d{4})', dates)
-        if m:
-            mon = {'january': 1, 'february': 2, 'march': 3, 'april': 4, 'may': 5,
-                   'june': 6, 'july': 7, 'august': 8, 'september': 9, 'october': 10,
-                   'november': 11, 'december': 12}.get(m.group(3).lower(), 1)
-            y, mo = int(m.group(4)), mon
-            d1, d2 = int(m.group(1)), int(m.group(2))
-            try:
-                meeting_start = datetime(y, mo, d1)
-                meeting_end = datetime(y, mo, d2)
-                checkin_dt = meeting_start - timedelta(days=1)   # 会前一天
-                checkout_dt = meeting_end + timedelta(days=1)    # 会后一天
-                checkin = checkin_dt.strftime('%Y-%m-%d')
-                checkout = checkout_dt.strftime('%Y-%m-%d')
-            except ValueError:
-                checkin = f'{y}-{mo:02d}-{d1:02d}'
-                checkout = f'{y}-{mo:02d}-{d2:02d}'
-
-    urls = {}
-    # Booking.com（日期自动填）
-    booking_q = f'ss={city_enc}'
-    if checkin:
-        booking_q += f'&checkin={checkin}&checkout={checkout}'
-    urls['Booking'] = f'https://www.booking.com/searchresults.html?{booking_q}'
-
-    # IHG（会员友好，只带城市，日期在页面手动选）
-    urls['IHG'] = f'https://www.ihg.com/hotels/us/en/find-hotels?destination={city_enc}'
-
-    return urls
 
 
 def show_details(mails, fetch_detail=False, push=False, log=print):
